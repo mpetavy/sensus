@@ -10,19 +10,31 @@ import (
 	"io/ioutil"
 	"log"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
 
 const (
-	CdStubFile = "cdstub.json"
+	CDInfoFile  = "cd-info.json"
+	CDInfosFile = "cd-infos.json"
 )
+
+type CDInfo struct {
+	Path      string                 `json:"path"`
+	Search    string                 `json:"search"`
+	FileCount int                    `json:"fileCount"`
+	CDStub    gomusicbrainz.CDStub   `json:"cdStub"`
+	CDStubs   []gomusicbrainz.CDStub `json:"cdStubs"`
+}
 
 var (
 	paths       common.MultiValueFlag
-	paceTimeout = flag.Int("pt", 10, "pace timeout in msec for Musicbrainz API request")
+	refresh     = flag.Bool("r", false, "refresh CD infos")
+	paceTimeout = flag.Int("pt", 100, "pace timeout in msec for Musicbrainz API request")
 	lastCall    = time.Time{}
 	client      *gomusicbrainz.WS2Client
+	cdInfos     []CDInfo
 )
 
 func init() {
@@ -131,17 +143,17 @@ func run1() error {
 	return nil
 }
 
-type CD struct {
-	Id     gomusicbrainz.MBID
-	Title  string
-	Artist string
-}
-
 func scanPath(path string) error {
+	common.DebugFunc(path)
+
 	files, err := ioutil.ReadDir(path)
 	if common.Error(err) {
 		return err
 	}
+
+	sort.SliceStable(files, func(i int, j int) bool {
+		return files[i].Name() < files[j].Name()
+	})
 
 	for _, file := range files {
 		if !file.IsDir() {
@@ -153,13 +165,18 @@ func scanPath(path string) error {
 			return err
 		}
 
-		return nil
+		//FIXME
+		if len(cdInfos) == 10 {
+			break
+		}
 	}
 
 	return nil
 }
 
 func paceClient() {
+	common.DebugFunc()
+
 	if lastCall.IsZero() {
 		return
 	}
@@ -172,34 +189,153 @@ func paceClient() {
 	time.Sleep(time.Millisecond * sleep)
 }
 
-func scanCDPath(path string) error {
-	fmt.Printf("%s\n", path)
+func writeCDInfo(path string, cdInfo *CDInfo) error {
+	common.DebugFunc(path)
+
+	fn := filepath.Join(path, CDInfoFile)
+
+	ba, err := json.MarshalIndent(cdInfo, "", "    ")
+	if common.Error(err) {
+		return err
+	}
+
+	err = ioutil.WriteFile(fn, ba, common.DefaultFileMode)
+	if common.Error(err) {
+		return err
+	}
+
+	return err
+}
+
+func deleteCDInfo(path string) error {
+	common.DebugFunc(path)
+
+	fn := filepath.Join(path, CDInfoFile)
+
+	err := common.FileDelete(fn)
+	if common.Error(err) {
+		return err
+	}
+
+	return nil
+}
+
+func readCDInfo(path string) (*CDInfo, error) {
+	common.DebugFunc(path)
+
+	fn := filepath.Join(path, CDInfoFile)
+
+	if !common.FileExists(fn) {
+		return &CDInfo{Path: path}, nil
+	}
+
+	ba, err := ioutil.ReadFile(fn)
+	if common.Error(err) {
+		return nil, err
+	}
+
+	cdInfo := &CDInfo{}
+
+	err = json.Unmarshal(ba, cdInfo)
+	if common.Error(err) {
+		return nil, err
+	}
+
+	return cdInfo, nil
+}
+
+func queryCDStubs(path string, cdInfo *CDInfo) error {
+	common.DebugFunc(path)
 
 	paceClient()
 
-	title := filepath.Base(path)
-	p := strings.Index(title, "-")
+	artist := filepath.Base(path)
+	p := strings.Index(artist, " - ")
 	if p != -1 {
-		title = title[p+1:]
+		artist = artist[:p]
+		artist = strings.TrimSpace(artist)
+	}
+
+	title := filepath.Base(path)
+	p = strings.LastIndex(title, " - ")
+	if p != -1 {
+		title = title[p+3:]
 		title = strings.TrimSpace(title)
 	}
+
+	var search string
+
+	if len(artist) > 0 {
+		search += fmt.Sprintf("artist:'%s'", artist)
+	}
+	if len(title) > 0 {
+		if len(search) > 0 {
+			search = search + " AND "
+		}
+		search += fmt.Sprintf("title:'%s'", title)
+	}
+
+	cdInfo.Search = search
+
+	files, err := ioutil.ReadDir(path)
+	if common.Error(err) {
+		return err
+	}
+
+	fileCount := 0
+	for _, file := range files {
+		if !file.IsDir() && file.Name() != CDInfoFile {
+			fileCount++
+		}
+	}
+
+	cdInfo.FileCount = fileCount
 
 	respCd, err := client.SearchCDStub(title, -1, -1)
 	if common.Error(err) {
 		return err
 	}
 
-	for _, cdstub := range respCd.CDStubs {
-		ba, err := json.MarshalIndent(cdstub, "", "  ")
+	for i, cdstub := range respCd.CDStubs {
+		if i == 0 {
+			cdInfo.CDStub = *cdstub
+		}
+
+		cdInfo.CDStubs = append(cdInfo.CDStubs, *cdstub)
+
+		//if cdInfo.CDStub.TrackList.Count != fileCount && fileCount == cdstub.TrackList.Count {
+		//	cdInfo.CDStub = *cdstub
+		//}
+	}
+
+	return nil
+}
+
+func scanCDPath(path string) error {
+	common.DebugFunc(path)
+
+	if *refresh {
+		err := deleteCDInfo(path)
 		if common.Error(err) {
 			return err
 		}
-		fmt.Printf("%s\n", string(ba))
-
-		ioutil.WriteFile(filepath.Dir(path), ba, common.DefaultFileMode)
 	}
 
-	fmt.Println()
+	cdInfo, err := readCDInfo(path)
+	if common.Error(err) {
+		return err
+	}
+
+	if cdInfo.CDStubs == nil {
+		queryCDStubs(path, cdInfo)
+	}
+
+	err = writeCDInfo(path, cdInfo)
+	if common.Error(err) {
+		return err
+	}
+
+	cdInfos = append(cdInfos, *cdInfo)
 
 	return nil
 }
@@ -221,6 +357,29 @@ func run() error {
 		if common.Error(err) {
 			return err
 		}
+
+		st := common.NewStringTable(false)
+		st.AddRow()
+		st.AddCol("Path")
+		st.AddCol("Search")
+		st.AddCol("FileCount")
+		st.AddCol("Artist")
+		st.AddCol("Title")
+		st.AddCol("Traclist-Count")
+
+		for _, cdInfo := range cdInfos {
+			st.AddRow()
+			st.AddCol(filepath.Base(cdInfo.Path))
+			st.AddCol(cdInfo.Search)
+			st.AddCol(cdInfo.FileCount)
+			st.AddCol(cdInfo.CDStub.Artist)
+			st.AddCol(cdInfo.CDStub.Title)
+			st.AddCol(cdInfo.CDStub.TrackList.Count)
+		}
+
+		fmt.Printf("%s\n", st.String())
+
+		ioutil.WriteFile(filepath.Join(path, CDInfosFile), []byte(st.String()), common.DefaultFileMode)
 	}
 
 	return nil
