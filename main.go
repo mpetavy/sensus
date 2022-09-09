@@ -9,6 +9,7 @@ import (
 	"github.com/mpetavy/common"
 	"io/ioutil"
 	"log"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -199,7 +200,7 @@ func writeCDInfo(path string, cdInfo *CDInfo) error {
 		return err
 	}
 
-	err = ioutil.WriteFile(fn, ba, common.DefaultFileMode)
+	err = os.WriteFile(fn, ba, common.DefaultFileMode)
 	if common.Error(err) {
 		return err
 	}
@@ -229,7 +230,7 @@ func readCDInfo(path string) (*CDInfo, error) {
 		return &CDInfo{Path: path}, nil
 	}
 
-	ba, err := ioutil.ReadFile(fn)
+	ba, err := os.ReadFile(fn)
 	if common.Error(err) {
 		return nil, err
 	}
@@ -379,7 +380,7 @@ func run() error {
 
 		fmt.Printf("%s\n", st.String())
 
-		ioutil.WriteFile(filepath.Join(path, CDInfosFile), []byte(st.String()), common.DefaultFileMode)
+		os.WriteFile(filepath.Join(path, CDInfosFile), []byte(st.String()), common.DefaultFileMode)
 	}
 
 	return nil
