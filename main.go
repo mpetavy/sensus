@@ -359,7 +359,7 @@ func run() error {
 			return err
 		}
 
-		st := common.NewStringTable(false)
+		st := common.NewStringTable()
 		st.AddRow()
 		st.AddCol("Path")
 		st.AddCol("Search")
