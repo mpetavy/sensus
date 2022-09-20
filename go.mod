@@ -5,7 +5,7 @@ go 1.17
 require (
 	github.com/bogem/id3v2 v1.2.0
 	github.com/michiwend/gomusicbrainz v0.0.0-20181012083520-6c07e13dd396
-	github.com/mpetavy/common v1.4.34
+	github.com/mpetavy/common v1.4.35
 )
 
 require (
