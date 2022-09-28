@@ -7,7 +7,6 @@ import (
 	"github.com/bogem/id3v2"
 	"github.com/michiwend/gomusicbrainz"
 	"github.com/mpetavy/common"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -147,7 +146,7 @@ func run1() error {
 func scanPath(path string) error {
 	common.DebugFunc(path)
 
-	files, err := ioutil.ReadDir(path)
+	files, err := os.ReadDir(path)
 	if common.Error(err) {
 		return err
 	}
@@ -245,7 +244,7 @@ func readCDInfo(path string) (*CDInfo, error) {
 	return cdInfo, nil
 }
 
-func queryCDStubs(path string, cdInfo *CDInfo) error {
+func queryCDStubs(path string, cdInfo *CDInfo) (*CDInfo, error) {
 	common.DebugFunc(path)
 
 	paceClient()
@@ -267,49 +266,61 @@ func queryCDStubs(path string, cdInfo *CDInfo) error {
 	var search string
 
 	if len(artist) > 0 {
-		search += fmt.Sprintf("artist:'%s'", artist)
+		search += fmt.Sprintf("artist:\"%s\"", artist)
 	}
 	if len(title) > 0 {
 		if len(search) > 0 {
 			search = search + " AND "
 		}
-		search += fmt.Sprintf("title:'%s'", title)
+		search += fmt.Sprintf("title:\"%s\"", title)
 	}
 
 	cdInfo.Search = search
 
-	files, err := ioutil.ReadDir(path)
+	files, err := os.ReadDir(path)
 	if common.Error(err) {
-		return err
+		return nil, err
 	}
 
 	fileCount := 0
 	for _, file := range files {
-		if !file.IsDir() && file.Name() != CDInfoFile {
+		if !file.IsDir() && file.Name() != CDInfoFile && strings.HasSuffix(strings.ToLower(file.Name()), ".mp3") {
 			fileCount++
 		}
 	}
 
 	cdInfo.FileCount = fileCount
 
-	respCd, err := client.SearchCDStub(title, -1, -1)
-	if common.Error(err) {
-		return err
-	}
+	//asr, err := client.SearchArtist(artist, -1, -1)
+	//if common.Error(err) {
+	//	return nil, err
+	//}
+	//
+	//for _, artist := range asr.Artists {
+	//	fmt.Printf("%+v %+v\n", artist.Name, artist.ID)
+	//}
 
-	for i, cdstub := range respCd.CDStubs {
-		if i == 0 {
-			cdInfo.CDStub = *cdstub
+	limit := 100
+	for offset := 0; offset < 10; offset++ {
+		respCd, err := client.SearchCDStub(search, limit, offset*limit)
+		if common.Error(err) {
+			return nil, err
 		}
 
-		cdInfo.CDStubs = append(cdInfo.CDStubs, *cdstub)
+		for i, cdstub := range respCd.CDStubs {
+			if i == 0 {
+				cdInfo.CDStub = *cdstub
+			}
 
-		//if cdInfo.CDStub.TrackList.Count != fileCount && fileCount == cdstub.TrackList.Count {
-		//	cdInfo.CDStub = *cdstub
-		//}
+			cdInfo.CDStubs = append(cdInfo.CDStubs, *cdstub)
+
+			if cdInfo.CDStub.TrackList.Count != fileCount && fileCount == cdstub.TrackList.Count {
+				cdInfo.CDStub = *cdstub
+			}
+		}
 	}
 
-	return nil
+	return cdInfo, nil
 }
 
 func scanCDPath(path string) error {
@@ -328,7 +339,10 @@ func scanCDPath(path string) error {
 	}
 
 	if cdInfo.CDStubs == nil {
-		queryCDStubs(path, cdInfo)
+		cdInfo, err = queryCDStubs(path, cdInfo)
+		if common.Error(err) {
+			return err
+		}
 	}
 
 	err = writeCDInfo(path, cdInfo)
@@ -380,7 +394,10 @@ func run() error {
 
 		fmt.Printf("%s\n", st.String())
 
-		os.WriteFile(filepath.Join(path, CDInfosFile), []byte(st.String()), common.DefaultFileMode)
+		err = os.WriteFile(filepath.Join(path, CDInfosFile), []byte(st.String()), common.DefaultFileMode)
+		if common.Error(err) {
+			return err
+		}
 	}
 
 	return nil
