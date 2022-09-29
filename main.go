@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -18,6 +19,13 @@ import (
 const (
 	CDInfoFile  = "cd-info.json"
 	CDInfosFile = "cd-infos.json"
+
+	queryLimit = 100
+)
+
+var (
+	regexYears    = regexp.MustCompile("\\d{4}")
+	regexObsolete = regexp.MustCompile("[^\\w ]")
 )
 
 type CDInfo struct {
@@ -41,6 +49,13 @@ func init() {
 	common.Init(false, "1.0.0", "", "", "2018", "musicbrainz", "mpetavy", fmt.Sprintf("https://github.com/mpetavy/%s", common.Title()), common.APACHE, nil, nil, nil, run, 0)
 
 	flag.Var(&paths, "p", "Path tp search for MP3 folders")
+}
+
+func dump(o interface{}) string {
+	s, err := json.MarshalIndent(o, "", " ")
+	common.Panic(err)
+
+	return string(s)
 }
 
 func run0() error {
@@ -123,7 +138,7 @@ func run1() error {
 		return err
 	}
 
-	fmt.Printf("%+v\n", artist)
+	fmt.Printf("%s\n", dump(artist))
 
 	// ---------------
 
@@ -244,52 +259,41 @@ func readCDInfo(path string) (*CDInfo, error) {
 	return cdInfo, nil
 }
 
-func queryCDStubs(path string, cdInfo *CDInfo) (*CDInfo, error) {
-	common.DebugFunc(path)
+func splitArtistAndRecording(txt string) (string, string, error) {
+	p := strings.IndexAny(txt, "-/")
+	if p == -1 {
+		return "", "", fmt.Errorf("cannot split artist and title")
+	}
+
+	artist := strings.TrimSpace(txt[:p])
+	recording := strings.TrimSpace(txt[p+1:])
+
+	artist = regexObsolete.ReplaceAllString(artist, "")
+
+	recording = regexYears.ReplaceAllString(recording, "")
+	recording = regexObsolete.ReplaceAllString(recording, "")
+
+	artist = strings.TrimSpace(artist)
+	recording = strings.TrimSpace(recording)
+
+	common.DebugFunc("%s: artist: %s title: %s", txt, artist, recording)
+
+	return artist, recording, nil
+}
+
+func queryCDStubs(artist string, recording string, fileCount int) (*CDInfo, error) {
+	common.DebugFunc()
 
 	paceClient()
 
-	artist := filepath.Base(path)
-	p := strings.Index(artist, " - ")
-	if p != -1 {
-		artist = artist[:p]
-		artist = strings.TrimSpace(artist)
+	search := fmt.Sprintf("%s %s", artist, recording)
+
+	common.Debug("Search: %s", search)
+
+	cdInfo := &CDInfo{
+		Search:    search,
+		FileCount: fileCount,
 	}
-
-	title := filepath.Base(path)
-	p = strings.LastIndex(title, " - ")
-	if p != -1 {
-		title = title[p+3:]
-		title = strings.TrimSpace(title)
-	}
-
-	var search string
-
-	if len(artist) > 0 {
-		search += fmt.Sprintf("artist:\"%s\"", artist)
-	}
-	if len(title) > 0 {
-		if len(search) > 0 {
-			search = search + " AND "
-		}
-		search += fmt.Sprintf("title:\"%s\"", title)
-	}
-
-	cdInfo.Search = search
-
-	files, err := os.ReadDir(path)
-	if common.Error(err) {
-		return nil, err
-	}
-
-	fileCount := 0
-	for _, file := range files {
-		if !file.IsDir() && file.Name() != CDInfoFile && strings.HasSuffix(strings.ToLower(file.Name()), ".mp3") {
-			fileCount++
-		}
-	}
-
-	cdInfo.FileCount = fileCount
 
 	//asr, err := client.SearchArtist(artist, -1, -1)
 	//if common.Error(err) {
@@ -300,11 +304,14 @@ func queryCDStubs(path string, cdInfo *CDInfo) (*CDInfo, error) {
 	//	fmt.Printf("%+v %+v\n", artist.Name, artist.ID)
 	//}
 
-	limit := 100
 	for offset := 0; offset < 10; offset++ {
-		respCd, err := client.SearchCDStub(search, limit, offset*limit)
+		respCd, err := client.SearchCDStub(search, queryLimit, offset*queryLimit)
 		if common.Error(err) {
 			return nil, err
+		}
+
+		if respCd.CDStubs == nil {
+			break
 		}
 
 		for i, cdstub := range respCd.CDStubs {
@@ -331,26 +338,99 @@ func scanCDPath(path string) error {
 		if common.Error(err) {
 			return err
 		}
-	}
-
-	cdInfo, err := readCDInfo(path)
-	if common.Error(err) {
-		return err
-	}
-
-	if cdInfo.CDStubs == nil {
-		cdInfo, err = queryCDStubs(path, cdInfo)
+	} else {
+		_, err := readCDInfo(path)
 		if common.Error(err) {
 			return err
 		}
+
+		return nil
 	}
 
-	err = writeCDInfo(path, cdInfo)
+	files, err := os.ReadDir(path)
 	if common.Error(err) {
 		return err
 	}
 
-	cdInfos = append(cdInfos, *cdInfo)
+	fileCount := 0
+	for _, file := range files {
+		if !file.IsDir() && file.Name() != CDInfoFile && strings.HasSuffix(strings.ToLower(file.Name()), ".mp3") {
+			fileCount++
+		}
+	}
+
+	artist, recording, err := splitArtistAndRecording(filepath.Base(path))
+	if common.Error(err) {
+		return err
+	}
+
+	for offsetArtists := 0; offsetArtists < 10; offsetArtists++ {
+		paceClient()
+
+		resp, err := client.SearchArtist(artist, queryLimit, offsetArtists*queryLimit)
+		if common.Error(err) {
+			return err
+		}
+
+		if resp.Artists == nil {
+			break
+		}
+
+		for _, artist := range resp.Artists {
+			for offsetRecordings := 0; offsetRecordings < 10; offsetRecordings++ {
+				search := fmt.Sprintf("arid=\"%s\" release=\"%s\" tracks=\"%d\"", artist.Id(), recording, fileCount)
+
+				common.Debug("SearchRelease: %s", search)
+
+				paceClient()
+
+				respReleases, err := client.SearchRelease(search, queryLimit, offsetRecordings*queryLimit)
+				if common.Error(err) {
+					return err
+				}
+
+				if respReleases.Releases == nil {
+					break
+				}
+
+				for _, release := range respReleases.Releases {
+					common.Debug("Artist: %s Recording: %s", artist.Name, release.Title)
+
+					paceClient()
+
+					respRelease, err := client.LookupRelease(release.Id())
+					if common.Error(err) {
+						return err
+					}
+
+					if respRelease.Mediums == nil {
+						continue
+					}
+
+					for _, medium := range respRelease.Mediums {
+						for _, track := range medium.Tracks {
+							common.Debug("id: %d title:; %s", track.Number, track.Recording.Title)
+						}
+
+						//break
+					}
+
+					//break
+				}
+
+				//break
+			}
+
+			//break
+		}
+	}
+
+	//err = writeCDInfo(path, cdInfo)
+	//if common.Error(err) {
+	//	return err
+	//}
+	//
+	//cdInfos = append(cdInfos, *cdInfo)
 
 	return nil
 }
