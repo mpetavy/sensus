@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	github.com/bogem/id3v2 v1.2.0
-	github.com/mpetavy/common v1.4.36
+	github.com/mpetavy/common v1.4.37
 )
 
 require (
