@@ -4,7 +4,8 @@ go 1.17
 
 require (
 	github.com/bogem/id3v2 v1.2.0
-	github.com/mpetavy/common v1.4.37
+	github.com/mpetavy/common v1.4.38
+	golang.org/x/exp v0.0.0-20221002003631-540bb7301a08
 )
 
 require (
