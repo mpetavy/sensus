@@ -77,9 +77,7 @@ func processFile(filename string, f os.FileInfo) error {
 	if common.Warn(err) {
 		return nil
 	}
-	defer func() {
-		common.Error(tag.Close())
-	}()
+	common.Error(tag.Close())
 
 	if tag.Artist() == "AC/DC" {
 		fmt.Printf("stop\n")
@@ -121,7 +119,11 @@ func processFile(filename string, f os.FileInfo) error {
 	if *various {
 		tagArtist = "Various Artists"
 		tagAlbum = album
-		tagTitle = artist + titleSeparator + title
+		if artist == album {
+			tagTitle = title
+		} else {
+			tagTitle = artist + titleSeparator + title
+		}
 	} else {
 		tagArtist = artist
 		tagAlbum = album
@@ -149,9 +151,6 @@ func processFile(filename string, f os.FileInfo) error {
 		if common.Warn(err) {
 			return nil
 		}
-		defer func() {
-			common.Error(tag.Close())
-		}()
 	}
 
 	track++
@@ -164,6 +163,8 @@ func processFile(filename string, f os.FileInfo) error {
 	if !*dry && common.Warn(tag.Save()) {
 		return nil
 	}
+
+	common.Error(tag.Close())
 
 	if *dry {
 		fmt.Printf("- would... ------------------\n")

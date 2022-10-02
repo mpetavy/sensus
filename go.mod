@@ -1,6 +1,6 @@
 module musicbrainz
 
-go 1.17
+go 1.19
 
 require (
 	github.com/bogem/id3v2 v1.2.0
