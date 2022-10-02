@@ -130,6 +130,8 @@ func processFile(filename string, f os.FileInfo) error {
 		tagTitle = title
 	}
 
+	track++
+
 	targetFile := filepath.Join(*output, tagArtist, tagAlbum, fmt.Sprintf("%03d %s.mp3", track, tagTitle))
 
 	if !*dry {
@@ -152,8 +154,6 @@ func processFile(filename string, f os.FileInfo) error {
 			return nil
 		}
 	}
-
-	track++
 
 	tag.SetArtist(tagArtist)
 	tag.SetAlbum(tagAlbum)
