@@ -8,6 +8,8 @@ import (
 	"golang.org/x/exp/slices"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -36,6 +38,139 @@ func init() {
 	dry = flag.Bool("n", true, "dry run")
 	various = flag.Bool("v", true, "various artists collection")
 	recursive = flag.Bool("r", false, "recursive directory walk")
+}
+
+func run1() error {
+	input := "/home/ransom/output/Various Artists/Pumuckel"
+	output := "/home/ransom/output/Various Artists/Pumuckl"
+
+	readFiles, err := os.ReadDir(input)
+	if common.Error(err) {
+		return err
+	}
+
+	files := []string{}
+	for _, file := range readFiles {
+		if file.IsDir() {
+			continue
+		}
+
+		files = append(files, file.Name())
+	}
+
+	sort.Strings(files)
+
+	dups := make(map[string]int)
+
+	for i, file := range files {
+		from := filepath.Join(input, file)
+		to := file
+
+		searches := []string{
+			"Kinder Hörspiel .*$",
+			"Mirabelle B \\- ",
+			"Meister Eder Und Sein Pumuckl ",
+			"Meister Eder Und Sein Hörbuch",
+			"Meister Eder Und Sein",
+			" Deutsch",
+			" Kobold",
+			"Pumuckl Und ",
+			"Hörspiel",
+			"Für Kinder",
+			"Folge",
+			"Cd",
+			"Lp",
+			"Mc",
+			"Ellis",
+			"Audiobook",
+			"Kaut",
+			"Und Seine n ",
+			".mp3",
+			" 1  ",
+			"\\d *",
+		}
+
+		for _, search := range searches {
+			r, err := regexp.Compile(search)
+			if common.Error(err) {
+				return err
+			}
+
+			loc := r.FindStringIndex(to)
+			if loc == nil {
+				continue
+			}
+
+			to = to[:loc[0]] + to[loc[1]:]
+		}
+
+		to = strings.TrimSpace(to)
+		to = fmt.Sprintf("%02d %s", i+1, to[3:])
+		to = strings.ReplaceAll(to, "  ", " ")
+		to = filepath.Join(output, strings.TrimSpace(to))
+
+		r, err := regexp.Compile("[\\wöäüÖÄÜß]*")
+		if common.Error(err) {
+			return err
+		}
+
+		words := r.FindAllString(to[3:], -1)
+		for _, word := range words {
+			if len(word) == 0 {
+				continue
+			}
+
+			v, _ := dups[word]
+			v++
+			dups[word]++
+		}
+
+		err = common.FileCopy(from, to)
+		if common.Error(err) {
+			return err
+		}
+
+		tag, err := id3v2.Open(to, id3v2.Options{Parse: true})
+		if common.Warn(err) {
+			return nil
+		}
+
+		tag.SetArtist("Various Artists")
+		tag.SetAlbum("Pumuckl")
+		tag.SetAlbum("Meister Eder Und sein Pumuckl")
+		tag.SetTitle(to)
+
+		err = tag.Save()
+		if common.Error(err) {
+			return nil
+		}
+
+		common.Error(tag.Close())
+
+		fmt.Printf("---------------------\n")
+		fmt.Printf("%s\n", from)
+		fmt.Printf("%s\n", to)
+	}
+
+	//var words []string
+	//
+	//for word, _ := range dups {
+	//	words = append(words, word)
+	//}
+	//
+	//sort.SliceStable(words, func(i, j int) bool {
+	//	v0 := dups[words[i]]
+	//	v1 := dups[words[j]]
+	//
+	//	return v0 > v1
+	//
+	//})
+	//
+	//for _, word := range words {
+	//	fmt.Printf("%s\t\t\t%d\n", word, dups[word])
+	//}
+
+	return nil
 }
 
 func fixString(s string) string {
@@ -78,10 +213,6 @@ func processFile(filename string, f os.FileInfo) error {
 		return nil
 	}
 	common.Error(tag.Close())
-
-	if tag.Artist() == "AC/DC" {
-		fmt.Printf("stop\n")
-	}
 
 	album, _ := filepath.Split(filename)
 	album = fixString(filepath.Base(album))
