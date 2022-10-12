@@ -326,11 +326,54 @@ func scanPath(path string) error {
 	return nil
 }
 
-func run() error {
+func run2() error {
 	for _, input = range inputs {
 		err := scanPath(input)
 		if common.Error(err) {
 			return err
+		}
+	}
+
+	return nil
+}
+
+func run() error {
+	source := "/home/ransom/_freenas/Media/Musik-Picard/Various Artists/Pumuckl"
+
+	readFiles, err := os.ReadDir(source)
+	if common.Error(err) {
+		return err
+	}
+
+	slices.SortStableFunc(readFiles, func(a os.DirEntry, b os.DirEntry) bool {
+		return a.Name() < b.Name()
+	})
+
+	for track, file := range readFiles {
+		if file.IsDir() {
+			continue
+		}
+
+		common.Debug(file.Name())
+
+		tag, err := id3v2.Open(filepath.Join(source, file.Name()), id3v2.Options{Parse: true})
+		if common.Warn(err) {
+			return nil
+		}
+
+		title := filepath.Base(file.Name())
+		if strings.HasSuffix(title, ".mp3") {
+			title = title[:len(title)-4]
+		}
+
+		tag.SetArtist("Various Artists")
+		tag.SetAlbum("Pumuckl")
+		tag.SetTitle(title)
+		tag.AddTextFrame(tag.CommonID("Track number/Position in set"), tag.DefaultEncoding(), strconv.Itoa(track+1))
+
+		err = tag.Save()
+		if common.Error(err) {
+			return nil
 		}
 	}
 
