@@ -5,202 +5,110 @@ import (
 	"fmt"
 	"github.com/bogem/id3v2"
 	"github.com/mpetavy/common"
-	"golang.org/x/exp/slices"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 )
 
 const (
-	titleSeparator = " - "
+	PICTURE = "APIC"
+	ALBUM   = "TALB"
+	TITLE   = "TIT2"
+	ARTIST  = "TPE1"
+	TRACK   = "TRCK"
 )
 
 var (
-	inputs    common.MultiValueFlag
-	input     string
-	output    *string
-	recursive *bool
-	dry       *bool
-	various   *bool
-	artists   []string
-	track     int
+	input              = flag.String("i", "", "input path")
+	output             = flag.String("o", "", "output path")
+	verbose            = flag.Bool("v", false, "verbose MP3 tag info")
+	dry                = flag.Bool("n", false, "dry run")
+	recursive          = flag.Bool("r", false, "recursive directory walk")
+	removeObsoleteTags = flag.Bool("x", false, "remove obsolete tags")
+	updates            common.MultiValueFlag
+	id3v2Tags          = make(map[string]string)
+	defaultTags        = []string{
+		PICTURE, // Attached picture - Bild
+		ALBUM,   // Album/Movie/Show title - Pumuckl
+		TITLE,   // TITLE - Der verdrehte Tag
+		ARTIST,  // Lead artist/Lead performer/Soloist/Performing group - Various Artists
+		TRACK,   // Track number/Position in set - Track Number
+	}
+	track int
 )
 
 func init() {
 	common.Init(false, "1.0.0", "", "", "2018", "musicbrainz", "mpetavy", fmt.Sprintf("https://github.com/mpetavy/%s", common.Title()), common.APACHE, nil, nil, nil, run, 0)
 
-	flag.Var(&inputs, "i", "input path(s)")
-	output = flag.String("o", "", "output path")
-	dry = flag.Bool("n", true, "dry run")
-	various = flag.Bool("v", true, "various artists collection")
-	recursive = flag.Bool("r", false, "recursive directory walk")
+	flag.Var(&updates, "u", "MP3 to update")
+
+	common.Events.NewFuncReceiver(common.EventFlagsParsed{}, func(event common.Event) {
+		if *output == "" {
+			return
+		}
+
+		if !common.FileExists(*output) {
+			common.Panic(fmt.Errorf("output path does not exist: %s", *output))
+		}
+
+		if !common.IsDirectory(*output) {
+			common.Panic(fmt.Errorf("output path is not a directory: %s", *output))
+		}
+	})
+
+	for k, v := range id3v2.V23CommonIDs {
+		id3v2Tags[v] = k
+	}
 }
 
-func run1() error {
-	input := "/home/ransom/output/Various Artists/Pumuckel"
-	output := "/home/ransom/output/Various Artists/Pumuckl"
+func createTarget(filename string, source string, target string) string {
+	filename = common.CleanPath(filename)
+	source = common.CleanPath(source)
+	target = common.CleanPath(target)
 
-	readFiles, err := os.ReadDir(input)
-	if common.Error(err) {
-		return err
+	if filename == source {
+		return filepath.Join(target, filepath.Base(filename))
 	}
 
-	files := []string{}
-	for _, file := range readFiles {
-		if file.IsDir() {
-			continue
-		}
-
-		files = append(files, file.Name())
-	}
-
-	sort.Strings(files)
-
-	dups := make(map[string]int)
-
-	for i, file := range files {
-		from := filepath.Join(input, file)
-		to := file
-
-		searches := []string{
-			"Kinder Hörspiel .*$",
-			"Mirabelle B \\- ",
-			"Meister Eder Und Sein Pumuckl ",
-			"Meister Eder Und Sein Hörbuch",
-			"Meister Eder Und Sein",
-			" Deutsch",
-			" Kobold",
-			"Pumuckl Und ",
-			"Hörspiel",
-			"Für Kinder",
-			"Folge",
-			"Cd",
-			"Lp",
-			"Mc",
-			"Ellis",
-			"Audiobook",
-			"Kaut",
-			"Und Seine n ",
-			".mp3",
-			" 1  ",
-			"\\d *",
-		}
-
-		for _, search := range searches {
-			r, err := regexp.Compile(search)
-			if common.Error(err) {
-				return err
-			}
-
-			loc := r.FindStringIndex(to)
-			if loc == nil {
-				continue
-			}
-
-			to = to[:loc[0]] + to[loc[1]:]
-		}
-
-		to = strings.TrimSpace(to)
-		to = fmt.Sprintf("%02d %s", i+1, to[3:])
-		to = strings.ReplaceAll(to, "  ", " ")
-		to = filepath.Join(output, strings.TrimSpace(to))
-
-		r, err := regexp.Compile("[\\wöäüÖÄÜß]*")
-		if common.Error(err) {
-			return err
-		}
-
-		words := r.FindAllString(to[3:], -1)
-		for _, word := range words {
-			if len(word) == 0 {
-				continue
-			}
-
-			v, _ := dups[word]
-			v++
-			dups[word]++
-		}
-
-		err = common.FileCopy(from, to)
-		if common.Error(err) {
-			return err
-		}
-
-		tag, err := id3v2.Open(to, id3v2.Options{Parse: true})
-		if common.Warn(err) {
-			return nil
-		}
-
-		tag.SetArtist("Various Artists")
-		tag.SetAlbum("Pumuckl")
-		tag.SetAlbum("Meister Eder Und sein Pumuckl")
-		tag.SetTitle(to)
-
-		err = tag.Save()
-		if common.Error(err) {
-			return nil
-		}
-
-		common.Error(tag.Close())
-
-		fmt.Printf("---------------------\n")
-		fmt.Printf("%s\n", from)
-		fmt.Printf("%s\n", to)
-	}
-
-	//var words []string
-	//
-	//for word, _ := range dups {
-	//	words = append(words, word)
-	//}
-	//
-	//sort.SliceStable(words, func(i, j int) bool {
-	//	v0 := dups[words[i]]
-	//	v1 := dups[words[j]]
-	//
-	//	return v0 > v1
-	//
-	//})
-	//
-	//for _, word := range words {
-	//	fmt.Printf("%s\t\t\t%d\n", word, dups[word])
-	//}
-
-	return nil
+	return filepath.Join(target, filename[len(source):])
 }
 
-func fixString(s string) string {
-	var sb strings.Builder
-
-	for _, r := range []rune(s) {
-		if unicode.IsDigit(r) || unicode.IsLetter(r) || unicode.IsSpace(r) {
-			sb.WriteRune(r)
-		}
+func showTags(filename string, tags *id3v2.Tag) {
+	sortedTags := make([]string, 0)
+	for k := range tags.AllFrames() {
+		sortedTags = append(sortedTags, k)
 	}
 
-	n := sb.String()
-	nLower := strings.ToLower(n)
+	sort.Strings(sortedTags)
 
-	searches := []string{"various artists", "various"}
-	for _, search := range searches {
-		p := strings.Index(nLower, search)
-		if p == -1 {
-			continue
+	if *verbose {
+		st := common.NewStringTable()
+		st.AddCols("file", "tag", "description", "data")
+
+		for _, k := range sortedTags {
+			frame := tags.GetLastFrame(k)
+			t := fmt.Sprintf("%v", frame)
+			if len(t) > 60 {
+				t = t[:60] + "..."
+			}
+
+			st.AddCols(filename, k, id3v2Tags[k], t)
 		}
 
-		n = n[:p] + n[p+len(search):]
-		nLower = nLower[:p] + nLower[p+len(search):]
+		fmt.Printf("%s\n", st.String())
+	} else {
+		fmt.Printf("%s\n", filepath.Base(filename))
 	}
 
-	return strings.ReplaceAll(strings.Title(strings.ToLower(strings.TrimSpace(n))), "  ", " ")
 }
 
 func processFile(filename string, f os.FileInfo) error {
 	if f.IsDir() {
+		fmt.Println()
+		fmt.Printf("[%s]\n", filename)
+
 		track = 0
 	}
 
@@ -208,64 +116,14 @@ func processFile(filename string, f os.FileInfo) error {
 		return nil
 	}
 
-	tag, err := id3v2.Open(filename, id3v2.Options{Parse: true})
-	if common.Warn(err) {
-		return nil
-	}
-	common.Error(tag.Close())
-
-	album, _ := filepath.Split(filename)
-	album = fixString(filepath.Base(album))
-
-	artist := fixString(tag.Artist())
-	if artist == "" {
-		p := strings.Index(filepath.Base(filename), "-")
-		if p != -1 {
-			artist = fixString(filepath.Base(filename)[:p])
-		}
+	targetFile := filename
+	if *output != "" {
+		targetFile = createTarget(filename, *input, *output)
 	}
 
-	if !slices.Contains(artists, artist) {
-		artists = append(artists, artist)
-	}
+	var tags *id3v2.Tag
 
-	title := strings.ReplaceAll(tag.Title(), tag.Artist(), "")
-	title = strings.ReplaceAll(title, "-", "")
-	title = fixString(title)
-	if title == "" {
-		p := strings.Index(filepath.Base(filename), "-")
-		if p != -1 {
-			fn := fixString(filepath.Base(filename)[p+1:])
-			fn = fn[:len(fn)-3]
-			title = fn
-		}
-	}
-
-	var (
-		tagArtist string
-		tagAlbum  string
-		tagTitle  string
-	)
-
-	if *various {
-		tagArtist = "Various Artists"
-		tagAlbum = album
-		if artist == album {
-			tagTitle = title
-		} else {
-			tagTitle = artist + titleSeparator + title
-		}
-	} else {
-		tagArtist = artist
-		tagAlbum = album
-		tagTitle = title
-	}
-
-	track++
-
-	targetFile := filepath.Join(*output, tagArtist, tagAlbum, fmt.Sprintf("%03d %s.mp3", track, tagTitle))
-
-	if !*dry {
+	if !*dry && *output != "" {
 		targetPath := filepath.Dir(targetFile)
 
 		if !common.FileExists(targetPath) {
@@ -280,35 +138,88 @@ func processFile(filename string, f os.FileInfo) error {
 			return err
 		}
 
-		tag, err = id3v2.Open(targetFile, id3v2.Options{Parse: true})
-		if common.Warn(err) {
-			return nil
+		options := id3v2.Options{Parse: true}
+
+		if *removeObsoleteTags {
+			options.ParseFrames = defaultTags
+		}
+
+		tags, err = id3v2.Open(targetFile, options)
+		if common.Error(err) {
+			tags, err = id3v2.Open(filename, id3v2.Options{Parse: false})
+			if common.Error(err) {
+				return nil
+			}
+		}
+	} else {
+		var err error
+
+		tags, err = id3v2.Open(filename, id3v2.Options{Parse: true})
+		if common.Error(err) {
+			tags, err = id3v2.Open(filename, id3v2.Options{Parse: true})
+			if common.Error(err) {
+				return nil
+			}
 		}
 	}
 
-	tag.SetArtist(tagArtist)
-	tag.SetAlbum(tagAlbum)
-	tag.SetTitle(tagTitle)
-	tag.AddTextFrame(tag.CommonID("Track number/Position in set"), tag.DefaultEncoding(), strconv.Itoa(track))
+	tags.SetVersion(3)
 
-	if !*dry && common.Warn(tag.Save()) {
+	showTags(filename, tags)
+
+	if *output == "" {
+		common.Error(tags.Close())
+
 		return nil
 	}
 
-	common.Error(tag.Close())
+	track++
 
-	if *dry {
-		fmt.Printf("- would... ------------------\n")
-	} else {
-		fmt.Printf("- will... -------------------\n")
+	tags.AddTextFrame(TRACK, tags.DefaultEncoding(), strconv.Itoa(track))
+
+	newName := ""
+
+	for _, update := range updates {
+		splits := strings.Split(update, "=")
+		if len(splits) != 2 {
+			return fmt.Errorf("wrong update: %s", update)
+		}
+
+		tag := splits[0]
+		value := splits[1]
+
+		_, ok := id3v2Tags[tag]
+
+		if !ok {
+			return fmt.Errorf("invalid tag: %s", tag)
+		}
+
+		if tag == TITLE {
+			newName = value
+		}
+
+		tags.AddTextFrame(tag, tags.DefaultEncoding(), value)
 	}
 
-	fmt.Printf("filename:     %s\n", filename)
-	fmt.Printf("new filename: %s\n", targetFile)
-	fmt.Printf("artist:       %s\n", tag.Artist())
-	fmt.Printf("album:        %s\n", tag.Album())
-	fmt.Printf("track:        %s\n", strconv.Itoa(track))
-	fmt.Printf("title:        %s\n", tag.Title())
+	showTags(targetFile, tags)
+
+	if *dry {
+		return nil
+	}
+
+	err := tags.Save()
+	if common.Error(err) {
+		return nil
+	}
+
+	common.Error(tags.Close())
+
+	if newName != "" {
+		err = os.Rename(targetFile, filepath.Join(filepath.Dir(targetFile), newName))
+		if common.Error(err) {
+			return nil
+		}
+	}
 
 	return nil
 }
@@ -321,60 +232,13 @@ func scanPath(path string) error {
 		return err
 	}
 
-	slices.Sort(artists)
-
-	return nil
-}
-
-func run2() error {
-	for _, input = range inputs {
-		err := scanPath(input)
-		if common.Error(err) {
-			return err
-		}
-	}
-
 	return nil
 }
 
 func run() error {
-	source := "/home/ransom/_freenas/Media/Musik-Picard/Various Artists/Pumuckl"
-
-	readFiles, err := os.ReadDir(source)
+	err := scanPath(*input)
 	if common.Error(err) {
 		return err
-	}
-
-	slices.SortStableFunc(readFiles, func(a os.DirEntry, b os.DirEntry) bool {
-		return a.Name() < b.Name()
-	})
-
-	for track, file := range readFiles {
-		if file.IsDir() {
-			continue
-		}
-
-		common.Debug(file.Name())
-
-		tag, err := id3v2.Open(filepath.Join(source, file.Name()), id3v2.Options{Parse: true})
-		if common.Warn(err) {
-			return nil
-		}
-
-		title := filepath.Base(file.Name())
-		if strings.HasSuffix(title, ".mp3") {
-			title = title[:len(title)-4]
-		}
-
-		tag.SetArtist("Various Artists")
-		tag.SetAlbum("Pumuckl")
-		tag.SetTitle(title)
-		tag.AddTextFrame(tag.CommonID("Track number/Position in set"), tag.DefaultEncoding(), strconv.Itoa(track+1))
-
-		err = tag.Save()
-		if common.Error(err) {
-			return nil
-		}
 	}
 
 	return nil
