@@ -225,9 +225,12 @@ func processFile(filename string, f os.FileInfo) error {
 }
 
 func scanPath(path string) error {
-	fw := common.NewFilewalker(path, *recursive, true, processFile)
+	fw, err := common.NewFilewalker(path, *recursive, true, processFile)
+	if common.Error(err) {
+		return err
+	}
 
-	err := fw.Run()
+	err = fw.Run()
 	if common.Error(err) {
 		return err
 	}

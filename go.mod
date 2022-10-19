@@ -4,8 +4,7 @@ go 1.19
 
 require (
 	github.com/bogem/id3v2 v1.2.0
-	github.com/mpetavy/common v1.4.46
-	golang.org/x/exp v0.0.0-20221006183845-316c7553db56
+	github.com/mpetavy/common v1.4.47
 )
 
 require (
@@ -40,6 +39,7 @@ require (
 	go.bug.st/serial v1.3.1 // indirect
 	go.opencensus.io v0.23.0 // indirect
 	golang.org/x/crypto v0.0.0-20220926161630-eccd6366d1be // indirect
+	golang.org/x/exp v0.0.0-20221006183845-316c7553db56 // indirect
 	golang.org/x/net v0.0.0-20220930213112-107f3e3c3b0b // indirect
 	golang.org/x/oauth2 v0.0.0-20210628180205-a41e5a781914 // indirect
 	golang.org/x/sys v0.0.0-20220928140112-f11e5e49a4ec // indirect
