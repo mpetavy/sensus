@@ -1,4 +1,4 @@
-module musicbrainz
+module sensus
 
 go 1.19
 

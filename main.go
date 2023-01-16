@@ -24,17 +24,16 @@ var (
 	input              = flag.String("i", "", "input path")
 	output             = flag.String("o", "", "output path")
 	verbose            = flag.Bool("v", false, "verbose MP3 tag info")
-	dry                = flag.Bool("n", false, "dry run")
 	recursive          = flag.Bool("r", false, "recursive directory walk")
 	removeObsoleteTags = flag.Bool("x", false, "remove obsolete tags")
 	updates            common.MultiValueFlag
-	id3v2Tags          = make(map[string]string)
+	id3v2TagToDescs    = make(map[string]string)
 	defaultTags        = []string{
-		PICTURE, // Attached picture - Bild
 		ALBUM,   // Album/Movie/Show title - Pumuckl
-		TITLE,   // TITLE - Der verdrehte Tag
 		ARTIST,  // Lead artist/Lead performer/Soloist/Performing group - Various Artists
 		TRACK,   // Track number/Position in set - Track Number
+		TITLE,   // TITLE - Der verdrehte Tag
+		PICTURE, // Attached picture - Bild
 	}
 	track int
 )
@@ -43,24 +42,6 @@ func init() {
 	common.Init(false, "1.0.0", "", "", "2018", "musicbrainz", "mpetavy", fmt.Sprintf("https://github.com/mpetavy/%s", common.Title()), common.APACHE, nil, nil, nil, run, 0)
 
 	flag.Var(&updates, "u", "MP3 to update")
-
-	common.Events.NewFuncReceiver(common.EventFlagsParsed{}, func(event common.Event) {
-		if *output == "" {
-			return
-		}
-
-		if !common.FileExists(*output) {
-			common.Panic(fmt.Errorf("output path does not exist: %s", *output))
-		}
-
-		if !common.IsDirectory(*output) {
-			common.Panic(fmt.Errorf("output path is not a directory: %s", *output))
-		}
-	})
-
-	for k, v := range id3v2.V23CommonIDs {
-		id3v2Tags[v] = k
-	}
 }
 
 func createTarget(filename string, source string, target string) string {
@@ -94,7 +75,7 @@ func showTags(filename string, tags *id3v2.Tag) {
 				t = t[:60] + "..."
 			}
 
-			st.AddCols(filename, k, id3v2Tags[k], t)
+			st.AddCols(filename[len(*input)+1:], k, id3v2TagToDescs[k], t)
 		}
 
 		fmt.Printf("%s\n", st.String())
@@ -116,14 +97,10 @@ func processFile(filename string, f os.FileInfo) error {
 		return nil
 	}
 
-	targetFile := filename
-	if *output != "" {
-		targetFile = createTarget(filename, *input, *output)
-	}
-
 	var tags *id3v2.Tag
 
-	if !*dry && *output != "" {
+	if *output != "" {
+		targetFile := createTarget(filename, *input, *output)
 		targetPath := filepath.Dir(targetFile)
 
 		if !common.FileExists(targetPath) {
@@ -138,37 +115,31 @@ func processFile(filename string, f os.FileInfo) error {
 			return err
 		}
 
-		options := id3v2.Options{Parse: true}
+		filename = targetFile
+	}
 
-		if *removeObsoleteTags {
-			options.ParseFrames = defaultTags
-		}
+	options := id3v2.Options{Parse: true}
 
-		tags, err = id3v2.Open(targetFile, options)
+	if *removeObsoleteTags {
+		options.ParseFrames = defaultTags
+	}
+
+	tags, err := id3v2.Open(filename, options)
+	if common.Error(err) {
+		tags, err = id3v2.Open(filename, id3v2.Options{Parse: false})
 		if common.Error(err) {
-			tags, err = id3v2.Open(filename, id3v2.Options{Parse: false})
-			if common.Error(err) {
-				return nil
-			}
-		}
-	} else {
-		var err error
-
-		tags, err = id3v2.Open(filename, id3v2.Options{Parse: true})
-		if common.Error(err) {
-			tags, err = id3v2.Open(filename, id3v2.Options{Parse: true})
-			if common.Error(err) {
-				return nil
-			}
+			return nil
 		}
 	}
 
+	defer func() {
+		common.Error(tags.Close())
+	}()
+
 	tags.SetVersion(3)
 
-	showTags(filename, tags)
-
 	if *output == "" {
-		common.Error(tags.Close())
+		showTags(filename, tags)
 
 		return nil
 	}
@@ -188,10 +159,26 @@ func processFile(filename string, f os.FileInfo) error {
 		tag := splits[0]
 		value := splits[1]
 
-		_, ok := id3v2Tags[tag]
+		_, ok := id3v2TagToDescs[tag]
 
 		if !ok {
 			return fmt.Errorf("invalid tag: %s", tag)
+		}
+
+		if value == "" {
+			tags.DeleteFrames(tag)
+
+			continue
+		}
+
+		if strings.HasPrefix(value, "~") {
+			_, ok = id3v2TagToDescs[value[1:]]
+
+			if !ok {
+				return fmt.Errorf("invalid tag: %s", tag)
+			}
+
+			value = tags.GetTextFrame(value[1:]).Text
 		}
 
 		if tag == TITLE {
@@ -201,21 +188,15 @@ func processFile(filename string, f os.FileInfo) error {
 		tags.AddTextFrame(tag, tags.DefaultEncoding(), value)
 	}
 
-	showTags(targetFile, tags)
+	showTags(filename, tags)
 
-	if *dry {
-		return nil
-	}
-
-	err := tags.Save()
+	err = tags.Save()
 	if common.Error(err) {
 		return nil
 	}
 
-	common.Error(tags.Close())
-
 	if newName != "" {
-		err = os.Rename(targetFile, filepath.Join(filepath.Dir(targetFile), newName))
+		err = os.Rename(filename, filepath.Join(filepath.Dir(filename), newName))
 		if common.Error(err) {
 			return nil
 		}
@@ -239,6 +220,23 @@ func scanPath(path string) error {
 }
 
 func run() error {
+	*input = common.CleanPath(*input)
+	*output = common.CleanPath(*output)
+
+	if *output != "" {
+		if !common.FileExists(*output) {
+			common.Panic(fmt.Errorf("output path does not exist: %s", *output))
+		}
+
+		if !common.IsDirectory(*output) {
+			common.Panic(fmt.Errorf("output path is not a directory: %s", *output))
+		}
+	}
+
+	for k, v := range id3v2.V23CommonIDs {
+		id3v2TagToDescs[v] = k
+	}
+
 	err := scanPath(*input)
 	if common.Error(err) {
 		return err
