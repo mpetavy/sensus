@@ -49,10 +49,6 @@ func createTarget(filename string, source string, target string) string {
 	source = common.CleanPath(source)
 	target = common.CleanPath(target)
 
-	if filename == source {
-		return filepath.Join(target, filepath.Base(filename))
-	}
-
 	return filepath.Join(target, filename[len(source):])
 }
 
@@ -220,8 +216,12 @@ func scanPath(path string) error {
 }
 
 func run() error {
-	*input = common.CleanPath(*input)
-	*output = common.CleanPath(*output)
+	if *input != "" {
+		*input = common.CleanPath(*input)
+	}
+	if *output != "" {
+		*output = common.CleanPath(*output)
+	}
 
 	if *output != "" {
 		if !common.FileExists(*output) {
