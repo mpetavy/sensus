@@ -1,4 +1,4 @@
-module sensus
+module github.com/mpetavy/sensus
 
 go 1.21
 
@@ -6,7 +6,7 @@ toolchain go1.21.1
 
 require (
 	github.com/bogem/id3v2 v1.2.0
-	github.com/mpetavy/common v1.6.38
+	github.com/mpetavy/common v1.6.41
 )
 
 require (
