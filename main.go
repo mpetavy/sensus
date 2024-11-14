@@ -78,7 +78,7 @@ func showTags(filename string, tags *id3v2.Tag) {
 			st.AddCols(filename[len(*input)+1:], k, id3v2TagToDescs[k], t)
 		}
 
-		fmt.Printf("%s\n", st.String())
+		fmt.Printf("%s\n", st.Table())
 	} else {
 		fmt.Printf("%s\n", filepath.Base(filename))
 	}
