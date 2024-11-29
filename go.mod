@@ -6,7 +6,7 @@ toolchain go1.23.2
 
 require (
 	github.com/bogem/id3v2 v1.2.0
-	github.com/mpetavy/common v1.9.28
+	github.com/mpetavy/common v1.9.29
 )
 
 require (
