@@ -24,7 +24,7 @@ const (
 var (
 	input              = flag.String("i", "", "input path")
 	output             = flag.String("o", "", "output path")
-	verbose            = flag.Bool("v", false, "verbose MP3 tag info")
+	mp3info            = flag.Bool("m", false, "verbose MP3 tag info")
 	recursive          = flag.Bool("r", false, "recursive directory walk")
 	removeObsoleteTags = flag.Bool("x", false, "remove obsolete tags")
 	updates            common.MultiValueFlag
@@ -64,7 +64,7 @@ func showTags(filename string, tags *id3v2.Tag) {
 
 	sort.Strings(sortedTags)
 
-	if *verbose {
+	if *mp3info {
 		st := common.NewStringTable()
 		st.AddCols("file", "tag", "description", "data")
 
